@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GreenGo — Fale em inglês. A IA corrige.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  color-scheme: dark;
+  --bg-edge: #04140e;
+  --bg-mid: #072a1d;
+  --bg-glow: #0f6a43;
+  --text: #f2faf5;
+  --text-nav: #a9c9b8;
+  --text-muted: #6f9582;
+  --mic-light: #aaf1c4;
+  --mic-mid: #3fbf86;
+  --mic-dark: #08925f;
+  --ring: rgba(120, 230, 170, .22);
+  --font: "Montserrat", "Helvetica Neue", Arial, sans-serif;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+*, *::before, *::after { box-sizing: inherit; margin: 0; }
+html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  height: 100%;
+  min-height: 100%;
+  font-family: var(--font);
+  color: var(--text);
+  background:
+    radial-gradient(ellipse 55% 60% at 50% 40%, var(--bg-glow) 0%, var(--bg-mid) 45%, var(--bg-edge) 100%),
+    var(--bg-edge);
+  overflow: hidden;
+  position: relative;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse 90% 80% at 50% 45%, transparent 40%, rgba(0,0,0,.35) 100%);
+  pointer-events: none;
+}
+
+.nav {
+  position: relative; z-index: 2;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 24px 32px;
+}
+.logo { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 500; color: var(--text); text-decoration: none; }
+.logo svg { width: 20px; height: 20px; }
+.links { display: flex; gap: 44px; }
+.links a, .login { color: var(--text-nav); text-decoration: none; font-size: 15px; font-weight: 500; transition: color .2s; }
+.links a:hover, .login:hover { color: var(--text); }
+.login { justify-self: end; }
+
+.stage {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding-bottom: 6vh;
+  text-align: center;
+}
+.mic-wrap { position: relative; width: 284px; height: 284px; display: grid; place-items: center; margin-bottom: 28px; }
+.ring { position: absolute; border-radius: 50%; border: 1px solid var(--ring); }
+.ring.r1 { inset: 0; border-color: rgba(120,230,170,.14); }
+.ring.r2 { inset: 36px; background: rgba(90,220,150,.06); border-color: rgba(140,240,185,.28); }
+.mic {
+  position: relative; width: 182px; height: 182px; border-radius: 50%; border: 0; cursor: pointer;
+  display: grid; place-items: center;
+  background: radial-gradient(circle at 30% 22%, var(--mic-light) 0%, var(--mic-mid) 48%, var(--mic-dark) 100%);
+  box-shadow: 0 0 60px 8px rgba(70,220,150,.35), 0 18px 40px rgba(0,0,0,.35), inset 0 2px 6px rgba(255,255,255,.45), inset 0 -10px 24px rgba(0,80,50,.35);
+  transition: transform .2s ease;
+}
+.mic:hover { transform: scale(1.03); }
+.mic:active { transform: scale(.97); }
+.mic:focus-visible { outline: 2px solid #fff; outline-offset: 6px; }
+.mic svg { width: 54px; height: 80px; color: #fff; }
+
+.listening .ring.r1 { animation: pulse 2.2s ease-out infinite; }
+.listening .ring.r2 { animation: pulse 2.2s ease-out .5s infinite; }
+@keyframes pulse { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(1.18); opacity: 0; } }
+.idle .ring.r2 { animation: breathe 4s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: scale(1.04); } }
+
+h1 { font-size: 26px; font-weight: 500; letter-spacing: .1px; line-height: 1.3; padding: 0 20px; }
+.hint { margin-top: 22px; font-size: 15px; font-weight: 400; color: var(--text-muted); min-height: 1.4em; max-width: 520px; padding: 0 20px; }
+
+@media (max-width: 640px) {
+  .nav { padding: 18px 20px; }
+  .links { gap: 18px; }
+  .links a, .login { font-size: 13px; }
+  .logo { font-size: 17px; }
+  .mic-wrap { transform: scale(.85); margin-bottom: 8px; }
+  h1 { font-size: 21px; }
+}
+@media (prefers-reduced-motion: reduce) { .ring { animation: none !important; } }
+</style>
+</head>
+<body>
+  <header class="nav">
+    <a class="logo" href="#" aria-label="GreenGo">
+      <svg viewBox="0 0 24 24" fill="#3fd68f" aria-hidden="true"><path d="M2 6c6-1 10 2 10 8v6C5 20 1 14 2 6z"/><path d="M22 4c1 8-3 14-10 16v-6c0-6 4-10 10-10z" opacity=".85"/></svg>
+      GreenGo
+    </a>
+    <nav class="links">
+      <a href="#">Treinar</a>
+      <a href="#">Sequência</a>
+      <a href="#">Outros</a>
+    </nav>
+    <a class="login" href="#">Entrar</a>
+  </header>
+
+  <main class="stage idle" id="stage">
+    <div class="mic-wrap">
+      <span class="ring r1"></span>
+      <span class="ring r2"></span>
+      <button class="mic" id="mic" aria-label="Começar a falar" aria-pressed="false">
+        <svg viewBox="0 0 54 80" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" aria-hidden="true">
+          <rect x="15" y="3" width="24" height="44" rx="12" fill="currentColor" stroke="none"/>
+          <path d="M4 33c0 13 10 22 23 22s23-9 23-22"/>
+          <path d="M27 56v18M15 76h24"/>
+        </svg>
+      </button>
+    </div>
+    <h1>Fale em inglês. A IA corrige.</h1>
+    <p class="hint" id="hint" aria-live="polite">toque para começar</p>
+  </main>
+
+<script>
+(function () {
+  var stage = document.getElementById('stage');
+  var mic = document.getElementById('mic');
+  var hint = document.getElementById('hint');
+  var listening = false;
+  var rec = null;
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function setState(on, text) {
+    listening = on;
+    stage.classList.toggle('listening', on);
+    stage.classList.toggle('idle', !on);
+    mic.setAttribute('aria-pressed', String(on));
+    mic.setAttribute('aria-label', on ? 'Parar de ouvir' : 'Começar a falar');
+    hint.textContent = text;
+  }
+
+  function stop() {
+    try { if (rec) rec.stop(); } catch (e) {}
+    setState(false, 'toque para começar');
+  }
+
+  mic.addEventListener('click', function () {
+    if (listening) { stop(); return; }
+    if (!SR) { setState(true, 'ouvindo… (reconhecimento de voz indisponível neste navegador)'); return; }
+    try {
+      rec = new SR();
+      rec.lang = 'en-US';
+      rec.interimResults = true;
+      rec.onresult = function (e) {
+        var t = '';
+        for (var i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript;
+        hint.textContent = '“' + t.trim() + '”';
+      };
+      rec.onerror = function () { setState(false, 'não consegui acessar o microfone — toque para tentar de novo'); };
+      rec.onend = function () { if (listening) setState(false, hint.textContent.charAt(0) === '“' ? hint.textContent : 'toque para começar'); };
+      rec.start();
+      setState(true, 'ouvindo… fale em inglês');
+    } catch (e) {
+      setState(true, 'ouvindo…');
+    }
+  });
+})();
+</script>
+</body>
+</html>
