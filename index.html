@@ -60,10 +60,10 @@ body::before {
 .stage {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding-bottom: 6vh;
+  padding: 72px 0 24px; overflow-y: auto; justify-content: safe center;
   text-align: center;
 }
-.mic-wrap { position: relative; width: 380px; height: 380px; margin-bottom: 10px; }
+.mic-wrap { position: relative; width: 300px; height: 300px; margin-bottom: 6px; }
 .mic-wrap::before { content: ""; position: absolute; inset: -12%; border-radius: 50%; background: radial-gradient(circle, rgba(60,220,150,.22) 0%, rgba(60,220,150,.06) 45%, transparent 70%); transition: opacity .4s; }
 .mic { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: none; cursor: pointer; border-radius: 50%; }
 .mic:focus-visible { outline: 2px solid #fff; outline-offset: 4px; }
@@ -74,12 +74,21 @@ canvas#orb { width: 100%; height: 100%; display: block; }
 h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; line-height: 1.3; padding: 0 20px; }
 .hint { margin-top: 22px; font-size: 15px; font-weight: 400; color: var(--text-muted); min-height: 1.4em; max-width: 520px; padding: 0 20px; }
 
+
+.card { margin-top: 18px; width: min(560px, 92vw); padding: 16px 18px; border-radius: 16px; background: rgba(255,255,255,.05); border: 1px solid rgba(140,240,185,.18); backdrop-filter: blur(6px); display: none; }
+.card.on { display: block; }
+.lesson { font: 500 11px/1 ui-monospace, Menlo, monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--text-muted); }
+.phrase { margin-top: 10px; font-size: 20px; font-weight: 500; color: var(--text); }
+.tl { margin-top: 14px; font-size: 13px; color: var(--text-nav); }
+.chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.chip { font: 500 14px var(--font); color: var(--text); background: rgba(70,220,150,.12); border: 1px solid rgba(140,240,185,.35); border-radius: 999px; padding: 8px 14px; cursor: pointer; transition: background .2s; }
+.chip:hover { background: rgba(70,220,150,.26); }
 @media (max-width: 640px) {
   .nav { padding: 18px 20px; }
   .links { gap: 18px; }
   .links a, .login { font-size: 13px; }
   .logo { font-size: 17px; }
-  .mic-wrap { width: 300px; height: 300px; }
+  .mic-wrap { width: 240px; height: 240px; }
   h1 { font-size: 21px; }
 }
 @media (prefers-reduced-motion: reduce) { .ring { animation: none !important; } }
@@ -105,7 +114,8 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     </div>
     <div class="tag" id="tag">standby</div>
     <h1>Fale em inglês. A IA corrige.</h1>
-    <p class="hint" id="hint" aria-live="polite">toque para começar</p>
+    <p class="hint" id="hint" aria-live="polite">toque no orbe para começar a aula</p>
+    <div class="card" id="card"><div class="lesson" id="lesson"></div><div class="phrase" id="phrase"></div><div id="tipbox" hidden><div class="tl">Você pode responder:</div><div class="chips" id="chips"></div></div></div>
   </main>
 
 <script>
@@ -184,7 +194,25 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
   }
   requestAnimationFrame(frame);
 
-  /* ---------- conversa ---------- */
+  /* ---------- aula ---------- */
+  var card = document.getElementById('card'), lesson = document.getElementById('lesson'),
+      phraseEl = document.getElementById('phrase'), tipbox = document.getElementById('tipbox'), chips = document.getElementById('chips');
+  var LESSONS = [
+    { name: 'Cumprimentar', pt: 'Oi! Eu sou seu assistente de inglês. Vou te ensinar a puxar conversa. Primeiro, um cumprimento simples. Diga:', en: 'Hi! How are you?', key: 'hi how are you',
+      partner: "I'm good, thanks! And you?", tips: ["I'm good, thanks!", 'Pretty good, and you?', 'Not bad, just a bit tired.'] },
+    { name: 'Se apresentar', pt: 'Agora, se apresente. Troque a palavra name pelo seu nome. Diga:', en: 'My name is Alex. Nice to meet you.', key: 'nice to meet you',
+      partner: 'Nice to meet you too! Where are you from?', tips: ["I'm from Brazil.", "I'm from São Paulo, in Brazil."] },
+    { name: 'Trabalho e estudo', pt: 'Uma ótima forma de puxar assunto é perguntar o que a pessoa faz. Diga:', en: 'What do you do?', key: 'what do you do',
+      partner: "I'm a teacher. What about you?", tips: ["I'm a student.", 'I work in sales.', 'I work with technology.'] },
+    { name: 'Hobbies', pt: 'Agora um assunto que rende bastante: o tempo livre. Diga:', en: 'What do you like to do in your free time?', key: 'what do you like to do in your free time',
+      partner: 'I love watching movies and playing guitar.', tips: ['That sounds fun! I like playing video games.', 'Cool! I enjoy listening to music.', 'Nice! I love going out with friends.'] },
+    { name: 'Pedir para repetir', pt: 'Se você não entender algo, não tem problema. Aprenda a pedir para repetir. Diga:', en: 'Sorry, could you repeat that, please?', key: 'could you repeat that please',
+      partner: 'Sure! I said I love watching movies.', tips: ['Oh, I see! That sounds fun.', 'Thanks! Me too.'] },
+    { name: 'Despedida', pt: 'Por fim, saiba encerrar a conversa com educação. Diga:', en: 'It was great talking to you. See you later!', key: 'great talking to you see you later',
+      partner: 'You too! Take care!', tips: ['Take care!', 'See you soon!'] }
+  ];
+  var step = 0, tries = 0, token = 0, resume = null, PRAISE = ['Muito bem!', 'Ótimo!', 'Isso aí!'];
+
   function set(st, text, label) {
     state = st;
     stage.className = 'stage ' + (st === 'idle' ? 'idle' : st);
@@ -192,24 +220,48 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     hint.textContent = text; tag.textContent = label;
   }
 
-  function speak(text, done) {
-    set('speaking', '“' + text + '”', 'falando');
-    var finished = false;
-    function end() { if (finished) return; finished = true; done && done(); }
-    if (!TTS) { setTimeout(end, 2600); return; }
-    try {
-      TTS.cancel();
-      var u = new SpeechSynthesisUtterance(text);
-      u.lang = 'en-US'; u.rate = .95;
-      u.onboundary = function () { spike = 1; };
-      u.onend = end; u.onerror = end;
-      TTS.speak(u);
-    } catch (e) { setTimeout(end, 2600); }
+  function showCard(replyPhase) {
+    var L = LESSONS[step];
+    card.classList.add('on');
+    lesson.textContent = 'Lição ' + (step + 1) + ' de ' + LESSONS.length + ' · ' + L.name;
+    phraseEl.textContent = replyPhase ? '“' + L.partner + '”' : L.en;
+    tipbox.hidden = !replyPhase;
+    chips.innerHTML = '';
+    if (replyPhase) L.tips.forEach(function (t) {
+      var b = document.createElement('button'); b.className = 'chip'; b.textContent = t;
+      b.addEventListener('click', function () { token++; stopAll(); say([{ t: t, l: 'en-US' }], replyListen); });
+      chips.appendChild(b);
+    });
   }
 
-  function listen() {
-    if (!SR) { set('idle', 'seu navegador não reconhece voz — tente o Chrome', 'standby'); return; }
-    var heard = '';
+  function stopAll() {
+    try { if (rec) rec.stop(); } catch (e) {}
+    try { TTS && TTS.cancel(); } catch (e) {}
+  }
+
+  function say(parts, done) {
+    var my = ++token;
+    (function next(i) {
+      if (my !== token) return;
+      if (i >= parts.length) { done && done(); return; }
+      var p = parts[i], fin = false;
+      function end() { if (fin || my !== token) return; fin = true; next(i + 1); }
+      set('speaking', '“' + p.t + '”', p.l === 'pt-BR' ? 'falando · pt' : 'speaking · en');
+      if (!TTS) { setTimeout(end, 1200 + p.t.length * 55); return; }
+      try {
+        TTS.cancel();
+        var u = new SpeechSynthesisUtterance(p.t);
+        u.lang = p.l; u.rate = p.l === 'en-US' ? .9 : 1;
+        u.onboundary = function () { spike = 1; };
+        u.onend = end; u.onerror = end;
+        TTS.speak(u);
+      } catch (e) { setTimeout(end, 1200 + p.t.length * 55); }
+    })(0);
+  }
+
+  function listen(onHeard) {
+    if (!SR) { set('idle', 'seu navegador não reconhece voz — use o Chrome', 'standby'); return; }
+    var my = ++token, heard = '';
     try {
       rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true;
       rec.onresult = function (e) {
@@ -217,23 +269,64 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
         for (var k = e.resultIndex; k < e.results.length; k++) heard += e.results[k][0].transcript;
         hint.textContent = '“' + heard.trim() + '”';
       };
-      rec.onerror = function () { set('idle', 'não consegui acessar o microfone — toque para tentar de novo', 'standby'); };
+      rec.onerror = function () { if (my === token) set('idle', 'não consegui acessar o microfone — toque para tentar de novo', 'standby'); };
       rec.onend = function () {
-        if (state !== 'listening') return;
-        heard.trim() ? speak('You said: ' + heard.trim() + '. Nice job! Say something else.', function () { set('idle', 'toque para continuar', 'standby'); })
-                     : set('idle', 'não ouvi nada — toque para tentar de novo', 'standby');
+        if (my !== token || state !== 'listening') return;
+        if (heard.trim()) onHeard(heard.trim());
+        else set('idle', 'não ouvi nada — toque no orbe para tentar de novo', 'standby');
       };
       rec.start(); set('listening', 'ouvindo… fale em inglês', 'ouvindo');
-    } catch (e) { set('idle', 'toque para começar', 'standby'); }
+    } catch (e) { set('idle', 'toque para continuar', 'standby'); }
+  }
+
+  function words(t) { return t.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean); }
+  function score(h, key) {
+    var hw = words(h), kw = words(key), n = 0;
+    kw.forEach(function (w) { if (hw.indexOf(w) > -1) n++; });
+    return n / kw.length;
+  }
+  function praise() { return PRAISE[Math.floor(Math.random() * PRAISE.length)]; }
+
+  function startStep() {
+    resume = startStep; tries = 0;
+    var L = LESSONS[step]; showCard(false);
+    say([{ t: L.pt, l: 'pt-BR' }, { t: L.en, l: 'en-US' }, { t: 'Agora é com você. Repita!', l: 'pt-BR' }], attempt);
+  }
+
+  function attempt() {
+    resume = attempt;
+    var L = LESSONS[step];
+    listen(function (h) {
+      if (score(h, L.key) >= .6) toReply(praise());
+      else if (++tries < 2) say([{ t: 'Quase! Vamos tentar de novo. Escute:', l: 'pt-BR' }, { t: L.en, l: 'en-US' }], attempt);
+      else toReply('Sem problema, o importante é praticar.');
+    });
+  }
+
+  function toReply(msg) {
+    var L = LESSONS[step]; showCard(true); resume = replyListen;
+    say([{ t: msg + ' Agora eu respondo:', l: 'pt-BR' }, { t: L.partner, l: 'en-US' },
+         { t: 'Você pode responder de algumas formas. Escolha uma das dicas e diga em inglês!', l: 'pt-BR' }], replyListen);
+  }
+
+  function replyListen() {
+    resume = replyListen;
+    listen(function () {
+      step++;
+      if (step >= LESSONS.length) {
+        step = 0; resume = startStep; card.classList.remove('on');
+        say([{ t: 'Parabéns! Você completou todas as lições. Toque no orbe para praticar de novo.', l: 'pt-BR' }], function () { set('idle', 'toque no orbe para recomeçar', 'standby'); });
+      } else {
+        resume = startStep;
+        say([{ t: praise() + ' É assim que a conversa flui. Vamos para a próxima!', l: 'pt-BR' }], startStep);
+      }
+    });
   }
 
   mic.addEventListener('click', function () {
-    if (state === 'idle') speak('Hi! Tell me something in English.', listen);
-    else {
-      try { if (rec) rec.stop(); } catch (e) {}
-      try { TTS && TTS.cancel(); } catch (e) {}
-      set('idle', 'toque para começar', 'standby');
-    }
+    if (state === 'idle') { (resume || startStep)(); return; }
+    token++; stopAll();
+    set('idle', 'pausado — toque no orbe para continuar', 'standby');
   });
 })();
 </script>
