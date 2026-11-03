@@ -115,7 +115,7 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     <div class="tag" id="tag">standby</div>
     <h1>Fale em inglês. A IA corrige.</h1>
     <p class="hint" id="hint" aria-live="polite">toque no orbe para começar a aula</p>
-    <div class="card" id="card"><div class="lesson" id="lesson"></div><div class="phrase" id="phrase"></div><div id="tipbox" hidden><div class="tl">Você pode responder:</div><div class="chips" id="chips"></div></div></div>
+    <div class="card" id="card"><div class="lesson" id="lesson"></div><div class="phrase" id="phrase"></div><div class="tl" id="fixline" hidden></div><div id="tipbox" hidden><div class="tl">Você pode responder:</div><div class="chips" id="chips"></div></div></div>
   </main>
 
 <script>
@@ -148,7 +148,7 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     if (state === 'speaking') {
       level += ((.35 + Math.random() * .65) - level) * .12;
       level = Math.max(level, spike); spike *= .9;
-    } else if (state === 'listening') level = .25 + .15 * Math.sin(t * 3.2);
+    } else if (state === 'listening' || state === 'thinking') level = .25 + .15 * Math.sin(t * 3.2);
     else level = .04 + .03 * Math.sin(t * .9);
     amp += (level - amp) * .15;
     rot += .003 + amp * .02;
@@ -229,14 +229,16 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     chips.innerHTML = '';
     if (replyPhase) L.tips.forEach(function (t) {
       var b = document.createElement('button'); b.className = 'chip'; b.textContent = t;
-      b.addEventListener('click', function () { token++; stopAll(); say([{ t: t, l: 'en-US' }], replyListen); });
+      b.addEventListener('click', function () { token++; stopTTS(); say([{ t: t, l: 'en-US' }], replyListen); });
       chips.appendChild(b);
     });
   }
 
+  function stopTTS() { try { TTS && TTS.cancel(); } catch (e) {} }
   function stopAll() {
+    waiting = null; recOn = false; clearTimeout(tmr); clearTimeout(nsT);
     try { if (rec) rec.stop(); } catch (e) {}
-    try { TTS && TTS.cancel(); } catch (e) {}
+    stopTTS();
   }
 
   function say(parts, done) {
@@ -251,7 +253,7 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
       try {
         TTS.cancel();
         var u = new SpeechSynthesisUtterance(p.t);
-        u.lang = p.l; u.rate = p.l === 'en-US' ? .9 : 1;
+        u.lang = p.l; u.rate = p.l === 'en-US' ? .9 : 1; var pv = pickVoice(p.l); if (pv) u.voice = pv;
         u.onboundary = function () { spike = 1; };
         u.onend = end; u.onerror = end;
         TTS.speak(u);
@@ -259,24 +261,41 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     })(0);
   }
 
+  var recOn = false, seen = 0, base = 0, okAt = 0, waiting = null, tmr = null, nsT = null;
+  function startRec() {
+    if (recOn) return true;
+    try {
+      rec = new SR(); rec.lang = 'en-US'; rec.continuous = true; rec.interimResults = true;
+      rec.onresult = function (e) {
+        seen = e.results.length;
+        if (!waiting || Date.now() < okAt) return;
+        var txt = '', fin = false;
+        for (var k = base; k < e.results.length; k++) { txt += e.results[k][0].transcript; fin = e.results[k].isFinal; }
+        txt = txt.trim(); if (!txt) return;
+        clearTimeout(nsT); clearTimeout(tmr);
+        hint.textContent = '“' + txt + '”';
+        if (fin) tmr = setTimeout(function () {
+          var cb = waiting; waiting = null;
+          if (cb) { set('thinking', '“' + txt + '”', 'pensando'); cb(txt); }
+        }, 700);
+      };
+      rec.onerror = function (e) {
+        if (e.error === 'no-speech' || e.error === 'aborted') return;
+        recOn = false; waiting = null; set('idle', 'não consegui acessar o microfone — toque para tentar de novo', 'standby');
+      };
+      rec.onend = function () { if (recOn) { seen = 0; base = 0; try { rec.start(); } catch (e) { recOn = false; } } };
+      seen = 0; base = 0; rec.start(); recOn = true; return true;
+    } catch (e) { return false; }
+  }
   function listen(onHeard) {
     if (!SR) { set('idle', 'seu navegador não reconhece voz — use o Chrome', 'standby'); return; }
-    var my = ++token, heard = '';
-    try {
-      rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true;
-      rec.onresult = function (e) {
-        heard = '';
-        for (var k = e.resultIndex; k < e.results.length; k++) heard += e.results[k][0].transcript;
-        hint.textContent = '“' + heard.trim() + '”';
-      };
-      rec.onerror = function () { if (my === token) set('idle', 'não consegui acessar o microfone — toque para tentar de novo', 'standby'); };
-      rec.onend = function () {
-        if (my !== token || state !== 'listening') return;
-        if (heard.trim()) onHeard(heard.trim());
-        else set('idle', 'não ouvi nada — toque no orbe para tentar de novo', 'standby');
-      };
-      rec.start(); set('listening', 'ouvindo… fale em inglês', 'ouvindo');
-    } catch (e) { set('idle', 'toque para continuar', 'standby'); }
+    if (!startRec()) { set('idle', 'toque para continuar', 'standby'); return; }
+    base = seen; okAt = Date.now() + 500; waiting = onHeard;
+    set('listening', 'ouvindo… fale em inglês', 'ouvindo');
+    clearTimeout(nsT);
+    nsT = setTimeout(function () {
+      if (waiting === onHeard) { waiting = null; set('idle', 'não ouvi nada — toque no orbe para tentar de novo', 'standby'); }
+    }, 15000);
   }
 
   function words(t) { return t.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean); }
@@ -323,8 +342,138 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     });
   }
 
+  /* ---------- IA no navegador (WebLLM) ---------- */
+  var MODEL = 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', WLLM = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm';
+  var engine = null, msgs = [], lastN = 0, fixline = document.getElementById('fixline');
+  var BANDS = [
+    { n: 'iniciante', en: 'Use very simple English: 3-6 words per sentence, present tense only.', pt: 'Explain in Portuguese.' },
+    { n: 'básico', en: 'Use simple English, short sentences, common words.', pt: 'Explain mostly in Portuguese.' },
+    { n: 'intermediário', en: 'Use natural everyday English with a few new expressions per turn.', pt: 'Keep Portuguese to one short sentence.' },
+    { n: 'avançado', en: 'Use natural English with idioms and phrasal verbs.', pt: 'Use Portuguese only for brief corrections.' }
+  ];
+  function loadP() {
+    try { var p = JSON.parse(localStorage.getItem('greengo.profile')); if (p && typeof p.level === 'number') return p; } catch (e) {}
+    return { level: 0, sessions: 0, words: [], errors: [], topic: '' };
+  }
+  var P = loadP();
+  function saveP() { try { localStorage.setItem('greengo.profile', JSON.stringify(P)); } catch (e) {} }
+  function band() { return BANDS[P.level < 20 ? 0 : P.level < 45 ? 1 : P.level < 70 ? 2 : 3]; }
+  function field(t, k) { var m = t.match(new RegExp('^\\s*' + k + '\\s*:\\s*(.+)$', 'mi')); return m ? m[1].trim() : ''; }
+
+  function pickVoice(l) {
+    var base = l.slice(0, 2).toLowerCase();
+    var vs = TTS ? TTS.getVoices().filter(function (v) { return v.lang.replace('_', '-').toLowerCase().indexOf(base) === 0; }) : [];
+    var best = vs.filter(function (v) { return /natural|neural|premium|enhanced|google/i.test(v.name); });
+    var pool = best.length ? best : vs;
+    var exact = pool.filter(function (v) { return v.lang.replace('_', '-').toLowerCase() === l.toLowerCase(); });
+    return exact[0] || pool[0] || null;
+  }
+
+  async function loadAI() {
+    if (engine) return true;
+    if (!navigator.gpu) { set('idle', 'sem WebGPU neste navegador (use Chrome ou Edge no computador). Usando a aula básica.', 'standby'); return false; }
+    try {
+      set('thinking', 'baixando a IA… 0%', 'carregando');
+      var w = await import(WLLM);
+      engine = await w.CreateMLCEngine(MODEL, { initProgressCallback: function (r) { hint.textContent = 'baixando a IA (só na primeira vez)… ' + Math.round((r.progress || 0) * 100) + '%'; } });
+      return true;
+    } catch (e) { set('idle', 'não consegui carregar a IA aqui. Usando a aula básica.', 'standby'); return false; }
+  }
+
+  async function begin() {
+    var my = ++token;
+    var ok = await loadAI();
+    if (my !== token) return;
+    if (ok) aiStart(); else setTimeout(function () { if (my === token) startStep(); }, 2200);
+  }
+
+  function aiStart() {
+    P.sessions++; saveP();
+    msgs = [{ role: 'user', content: P.sessions > 1
+      ? '[Start of session. Returning student: welcome them back in Portuguese, mention the last topic (' + (P.topic || 'none') + ') and move on to something new.]'
+      : '[Start of session. First lesson: greet in Portuguese, say in one sentence that you will teach them to start conversations in English, then begin with a simple hello.]' }];
+    aiTurn();
+  }
+
+  async function aiTurn() {
+    resume = aiTurn;
+    var my = ++token, b = band(), out;
+    set('thinking', 'pensando…', 'pensando');
+    var sys = 'You are GreenGo, a friendly English tutor for a Brazilian Portuguese speaker, in a spoken conversation. Teach them how to start and keep conversations going in English, step by step. Introduce a little new vocabulary each turn and never repeat topics already covered. Student level: ' + b.n + '. ' + b.en +
+      ' Words the student already used: ' + P.words.slice(-25).join(', ') + '. Recent mistakes: ' + P.errors.join('; ') + '. Last topic: ' + (P.topic || 'none') + '.' +
+      ' Reply ONLY in this format, one item per line:\nPT: (max 2 short sentences in Brazilian Portuguese: praise, correction or explanation. ' + b.pt + ')\nEN: (what you say in English, 1-2 short sentences ending with a question the student can answer)\nTIPS: (three short English replies the student could say, separated by |)\nFIX: (only if the student made a mistake: wrong phrase -> correct phrase)\nTOPIC: (2-4 words)';
+var buf = '', ptDone = false, enDone = false, q = [], playing = false, genDone = false;
+    function pump() {
+      if (my !== token || playing) return;
+      var p = q.shift();
+      if (!p) { if (genDone) aiListen(); else set('thinking', 'pensando…', 'pensando'); return; }
+      playing = true;
+      speakOne(p, function () { playing = false; pump(); });
+    }
+    try {
+      var stream = await engine.chat.completions.create({ messages: [{ role: 'system', content: sys }].concat(msgs.slice(-6)), max_tokens: 170, temperature: .7, stream: true });
+      for await (var ch of stream) {
+        if (my !== token) { try { engine.interruptGenerate(); } catch (e) {} return; }
+        buf += (ch.choices[0] && ch.choices[0].delta && ch.choices[0].delta.content) || '';
+        if (!ptDone && /^\s*EN\s*:/im.test(buf)) { ptDone = true; var p0 = field(buf, 'PT'); if (p0) { q.push({ t: p0, l: 'pt-BR' }); pump(); } }
+        if (!enDone && /^\s*EN\s*:[^\n]+\n/im.test(buf)) {
+          enDone = true; var e0 = field(buf, 'EN'); q.push({ t: e0, l: 'en-US' });
+          card.classList.add('on'); phraseEl.textContent = e0; tipbox.hidden = true; pump();
+        }
+      }
+    } catch (e) { if (my === token) set('idle', 'a IA falhou — toque no orbe para tentar de novo', 'standby'); return; }
+    if (my !== token) return;
+    var en = field(buf, 'EN') || buf.trim(), fix = field(buf, 'FIX'), top = field(buf, 'TOPIC');
+    var tips = field(buf, 'TIPS').split('|').map(function (x) { return x.trim(); }).filter(Boolean).slice(0, 3);
+    if (!enDone) q.push({ t: en, l: 'en-US' });
+    genDone = true;
+    msgs.push({ role: 'assistant', content: buf });
+    if (top) P.topic = top;
+    if (fix) P.errors = P.errors.concat(fix).slice(-8);
+    if (lastN) { P.level = Math.max(0, Math.min(100, P.level + (fix ? -.3 : .8) + Math.min(lastN, 12) * .1)); lastN = 0; }
+    saveP();
+    showAI(en, tips, fix);
+    pump();
+  }
+
+  function speakOne(p, cb) {
+    set('speaking', '“' + p.t + '”', p.l === 'pt-BR' ? 'falando · pt' : 'speaking · en');
+    var fin = false; function end() { if (fin) return; fin = true; cb(); }
+    if (!TTS) { setTimeout(end, 1200 + p.t.length * 55); return; }
+    try {
+      var u = new SpeechSynthesisUtterance(p.t); u.lang = p.l; u.rate = p.l === 'en-US' ? .9 : 1;
+      var v = pickVoice(p.l); if (v) u.voice = v;
+      u.onboundary = function () { spike = 1; }; u.onend = end; u.onerror = end;
+      TTS.speak(u);
+    } catch (e) { setTimeout(end, 1200); }
+  }
+
+  function showAI(en, tips, fix) {
+    card.classList.add('on');
+    lesson.textContent = 'Nível ' + band().n + ' · sessão ' + P.sessions;
+    phraseEl.textContent = en;
+    fixline.hidden = !fix; fixline.textContent = fix ? 'Correção: ' + fix : '';
+    tipbox.hidden = !tips.length; chips.innerHTML = '';
+    tips.forEach(function (t) {
+      var bt = document.createElement('button'); bt.className = 'chip'; bt.textContent = t;
+      bt.addEventListener('click', function () { token++; stopTTS(); say([{ t: t, l: 'en-US' }], aiListen); });
+      chips.appendChild(bt);
+    });
+  }
+
+  function aiListen() {
+    resume = aiListen;
+    listen(function (h) {
+      var ws = words(h); lastN = ws.length;
+      ws.forEach(function (w) { if (w.length > 3 && P.words.indexOf(w) < 0) P.words.push(w); });
+      P.words = P.words.slice(-60); saveP();
+      msgs.push({ role: 'user', content: h });
+      aiTurn();
+    });
+  }
+
   mic.addEventListener('click', function () {
-    if (state === 'idle') { (resume || startStep)(); return; }
+    if (state === 'idle') { (resume || begin)(); return; }
     token++; stopAll();
     set('idle', 'pausado — toque no orbe para continuar', 'standby');
   });
