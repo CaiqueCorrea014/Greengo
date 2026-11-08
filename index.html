@@ -83,6 +83,18 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
 .chips { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .chip { font: 500 14px var(--font); color: var(--text); background: rgba(70,220,150,.12); border: 1px solid rgba(140,240,185,.35); border-radius: 999px; padding: 8px 14px; cursor: pointer; transition: background .2s; }
 .chip:hover { background: rgba(70,220,150,.26); }
+.gear { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 3; font: 500 12px var(--font); color: var(--text-nav); background: rgba(255,255,255,.06); border: 1px solid rgba(140,240,185,.25); border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+.gear:hover { color: var(--text); }
+.cfg { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; background: rgba(2,12,8,.78); padding: 16px; }
+.cfg[hidden] { display: none; }
+.cfg-box { width: min(520px, 100%); max-height: 90vh; overflow: auto; background: #082a1d; border: 1px solid rgba(140,240,185,.25); border-radius: 16px; padding: 20px; }
+.cfg h2 { font-size: 18px; font-weight: 600; }
+.cfg p { margin: 8px 0 14px; font-size: 13px; color: var(--text-nav); line-height: 1.5; }
+.row { padding: 12px 0; border-top: 1px solid rgba(140,240,185,.15); display: grid; gap: 6px; }
+.row b { font-size: 14px; } .row small { color: var(--text-muted); font-size: 12px; } .row a { color: #7df0b4; }
+.row input { font: 14px var(--font); padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(140,240,185,.25); background: rgba(0,0,0,.25); color: var(--text); }
+.acts { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+.acts button { font: 500 14px var(--font); padding: 9px 16px; border-radius: 999px; border: 1px solid rgba(140,240,185,.35); background: rgba(70,220,150,.15); color: var(--text); cursor: pointer; }
 @media (max-width: 640px) {
   .nav { padding: 18px 20px; }
   .links { gap: 18px; }
@@ -118,6 +130,13 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     <div class="card" id="card"><div class="lesson" id="lesson"></div><div class="phrase" id="phrase"></div><div class="tl" id="fixline" hidden></div><div id="tipbox" hidden><div class="tl">Você pode responder:</div><div class="chips" id="chips"></div></div></div>
   </main>
 
+<button class="gear" id="gear" aria-label="Configurar IA">⚙ IA</button>
+  <div class="cfg" id="cfg" hidden><div class="cfg-box">
+    <h2>Provedores de IA</h2>
+    <p>Cole a chave de um ou mais provedores. O app usa o primeiro disponível e troca sozinho quando o limite do dia acaba. As chaves ficam só neste navegador.</p>
+    <div id="cfgRows"></div>
+    <div class="acts"><button id="cfgClose">Fechar</button><button id="cfgSave">Salvar</button></div>
+  </div></div>
 <script>
 (function () {
   var stage = document.getElementById('stage'), mic = document.getElementById('mic'),
@@ -236,7 +255,7 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
 
   function stopTTS() { try { TTS && TTS.cancel(); } catch (e) {} }
   function stopAll() {
-    waiting = null; recOn = false; clearTimeout(tmr); clearTimeout(nsT);
+    waiting = null; recOn = false; clearTimeout(tmr); clearTimeout(nsT); try { ctl && ctl.abort(); } catch (e) {}
     try { if (rec) rec.stop(); } catch (e) {}
     stopTTS();
   }
@@ -343,8 +362,87 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
   }
 
   /* ---------- IA no navegador (WebLLM) ---------- */
-  var MODEL = 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', WLLM = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm';
-  var engine = null, msgs = [], lastN = 0, fixline = document.getElementById('fixline');
+var msgs = [], lastN = 0, ctl = null, fixline = document.getElementById('fixline');
+  var PROV = [
+    { id: 'groq', name: 'Groq', url: 'https://api.groq.com/openai/v1/chat/completions', model: 'llama-3.3-70b-versatile', link: 'https://console.groq.com/keys' },
+    { id: 'gemini', name: 'Google Gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', model: 'gemini-2.5-flash', link: 'https://aistudio.google.com/apikey' },
+    { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1/chat/completions', model: 'meta-llama/llama-3.3-70b-instruct:free', link: 'https://openrouter.ai/keys' }
+  ];
+  function loadCfg() { var c; try { c = JSON.parse(localStorage.getItem('greengo.cfg')); } catch (e) {} c = c || {}; c.p = c.p || {}; c.off = c.off || {}; return c; }
+  var CFG = loadCfg();
+  function saveCfg() { try { localStorage.setItem('greengo.cfg', JSON.stringify(CFG)); } catch (e) {} }
+  function hasKey() { return PROV.some(function (p) { return CFG.p[p.id] && CFG.p[p.id].key; }); }
+  function penalize(id, status, txt) {
+    var d = new Date(), t = Date.now();
+    if (status === 429) { var day = /day|daily|quota|exhaust/i.test(txt); d.setHours(24, 0, 0, 0); t = day ? d.getTime() : t + 60000; }
+    else if (status === 401 || status === 403) t += 864e5;
+    else if (status === 404) t += 36e5;
+    else t += 3e5;
+    CFG.off[id] = t; saveCfg();
+  }
+  function pstatus(id) {
+    var c = CFG.p[id]; if (!c || !c.key) return 'sem chave';
+    var o = CFG.off[id] || 0;
+    return o > Date.now() ? 'em pausa até ' + new Date(o).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'ativo';
+  }
+
+  /* tenta cada provedor em ordem; se um falha ou esgota o limite, passa ao próximo sem avisar */
+  async function* chatStream(messages, c) {
+    var tried = [], started = false;
+    for (var i = 0; i < PROV.length; i++) {
+      var p = PROV[i], pc = CFG.p[p.id];
+      if (!pc || !pc.key || (CFG.off[p.id] || 0) > Date.now()) continue;
+      try {
+        var r = await fetch(p.url, { method: 'POST', signal: c.signal, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + pc.key },
+          body: JSON.stringify({ model: pc.model || p.model, messages: messages, max_tokens: 170, temperature: .7, stream: true }) });
+        if (!r.ok) { var tx = ''; try { tx = await r.text(); } catch (e) {} penalize(p.id, r.status, tx); tried.push(p.name + ' ' + r.status); continue; }
+        var rd = r.body.getReader(), dec = new TextDecoder(), b = '';
+        for (;;) {
+          var x = await rd.read(); if (x.done) break;
+          b += dec.decode(x.value, { stream: true });
+          var ls = b.split('\n'); b = ls.pop();
+          for (var j = 0; j < ls.length; j++) {
+            var l = ls[j].trim(); if (l.indexOf('data:') !== 0) continue;
+            var d = l.slice(5).trim(); if (d === '[DONE]') return;
+            var o; try { o = JSON.parse(d); } catch (e) { continue; }
+            started = true; yield o;
+          }
+        }
+        return;
+      } catch (e) {
+        if (c.signal.aborted || started) return;
+        CFG.off[p.id] = Date.now() + 3e5; saveCfg(); tried.push(p.name + ' (sem conexão)');
+      }
+    }
+    throw new Error('Nenhum provedor respondeu (' + (tried.join(', ') || 'sem chaves ativas') + ').');
+  }
+
+  /* painel de configuração */
+  var cfgEl = document.getElementById('cfg'), cfgRows = document.getElementById('cfgRows');
+  function openCfg() {
+    cfgRows.innerHTML = '';
+    PROV.forEach(function (p) {
+      var c = CFG.p[p.id] || {}, d = document.createElement('div'); d.className = 'row'; d.dataset.id = p.id;
+      d.innerHTML = '<b></b><small></small><input type="password" placeholder="chave de API" autocomplete="off"><input type="text" placeholder="modelo">';
+      d.children[0].textContent = p.name;
+      d.children[1].textContent = pstatus(p.id) + ' · ';
+      var a = document.createElement('a'); a.href = p.link; a.target = '_blank'; a.rel = 'noopener'; a.textContent = 'criar chave'; d.children[1].appendChild(a);
+      d.children[2].value = c.key || ''; d.children[3].value = c.model || p.model;
+      cfgRows.appendChild(d);
+    });
+    cfgEl.hidden = false;
+  }
+  document.getElementById('gear').addEventListener('click', openCfg);
+  document.getElementById('cfgClose').addEventListener('click', function () { cfgEl.hidden = true; });
+  document.getElementById('cfgSave').addEventListener('click', function () {
+    Array.prototype.forEach.call(cfgRows.children, function (d) {
+      var id = d.dataset.id, def = PROV.filter(function (p) { return p.id === id; })[0];
+      CFG.p[id] = { key: d.children[2].value.trim(), model: d.children[3].value.trim() || def.model };
+      delete CFG.off[id];
+    });
+    saveCfg(); cfgEl.hidden = true;
+    if (state === 'idle') hint.textContent = hasKey() ? 'toque no orbe para começar' : 'adicione ao menos uma chave de IA';
+  });
   var BANDS = [
     { n: 'iniciante', en: 'Use very simple English: 3-6 words per sentence, present tense only.', pt: 'Explain in Portuguese.' },
     { n: 'básico', en: 'Use simple English, short sentences, common words.', pt: 'Explain mostly in Portuguese.' },
@@ -369,22 +467,9 @@ h1 { margin-top: 26px; font-size: 26px; font-weight: 500; letter-spacing: .1px; 
     return exact[0] || pool[0] || null;
   }
 
-  async function loadAI() {
-    if (engine) return true;
-    if (!navigator.gpu) { set('idle', 'sem WebGPU neste navegador (use Chrome ou Edge no computador). Usando a aula básica.', 'standby'); return false; }
-    try {
-      set('thinking', 'baixando a IA… 0%', 'carregando');
-      var w = await import(WLLM);
-      engine = await w.CreateMLCEngine(MODEL, { initProgressCallback: function (r) { hint.textContent = 'baixando a IA (só na primeira vez)… ' + Math.round((r.progress || 0) * 100) + '%'; } });
-      return true;
-    } catch (e) { set('idle', 'não consegui carregar a IA aqui. Usando a aula básica.', 'standby'); return false; }
-  }
-
-  async function begin() {
-    var my = ++token;
-    var ok = await loadAI();
-    if (my !== token) return;
-    if (ok) aiStart(); else setTimeout(function () { if (my === token) startStep(); }, 2200);
+function begin() {
+    if (!hasKey()) { openCfg(); set('idle', 'adicione ao menos uma chave de IA para começar', 'standby'); return; }
+    aiStart();
   }
 
   function aiStart() {
@@ -411,9 +496,9 @@ var buf = '', ptDone = false, enDone = false, q = [], playing = false, genDone =
       speakOne(p, function () { playing = false; pump(); });
     }
     try {
-      var stream = await engine.chat.completions.create({ messages: [{ role: 'system', content: sys }].concat(msgs.slice(-6)), max_tokens: 170, temperature: .7, stream: true });
+      ctl = new AbortController(); var stream = chatStream([{ role: 'system', content: sys }].concat(msgs.slice(-6)), ctl);
       for await (var ch of stream) {
-        if (my !== token) { try { engine.interruptGenerate(); } catch (e) {} return; }
+        if (my !== token) { ctl.abort(); return; }
         buf += (ch.choices[0] && ch.choices[0].delta && ch.choices[0].delta.content) || '';
         if (!ptDone && /^\s*EN\s*:/im.test(buf)) { ptDone = true; var p0 = field(buf, 'PT'); if (p0) { q.push({ t: p0, l: 'pt-BR' }); pump(); } }
         if (!enDone && /^\s*EN\s*:[^\n]+\n/im.test(buf)) {
@@ -421,7 +506,7 @@ var buf = '', ptDone = false, enDone = false, q = [], playing = false, genDone =
           card.classList.add('on'); phraseEl.textContent = e0; tipbox.hidden = true; pump();
         }
       }
-    } catch (e) { if (my === token) set('idle', 'a IA falhou — toque no orbe para tentar de novo', 'standby'); return; }
+    } catch (e) { if (my === token) { set('idle', (e && e.message || 'IA indisponível.') + ' Seguindo com a aula básica.', 'standby'); setTimeout(function () { if (my === token) startStep(); }, 3500); } return; }
     if (my !== token) return;
     var en = field(buf, 'EN') || buf.trim(), fix = field(buf, 'FIX'), top = field(buf, 'TOPIC');
     var tips = field(buf, 'TIPS').split('|').map(function (x) { return x.trim(); }).filter(Boolean).slice(0, 3);
